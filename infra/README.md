@@ -56,10 +56,15 @@ The ECS inference service automatically loads model artifacts from S3 on contain
 
 To publish a new model:
 ```bash
+# Verify artifacts are present locally
+ls -la ./artifacts/
+# Expected: model.joblib, metadata.json, metrics.json
+
 # Upload artifacts to S3
+# ⚠️ The --delete flag removes files in S3 not present locally
 aws s3 sync ./artifacts s3://{artifacts_bucket}/models/latest/ --delete
 
-# Trigger ECS service redeployment
+# Trigger ECS service redeployment (picks up new artifacts)
 aws ecs update-service \
   --cluster {ecs_cluster_name} \
   --service {ecs_service_name} \

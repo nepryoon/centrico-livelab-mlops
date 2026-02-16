@@ -105,16 +105,16 @@ resource "aws_iam_policy" "ecs_task_s3_artifacts_read" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "ReadArtifactsFromS3"
-        Effect = "Allow"
-        Action = [
-          "s3:GetObject",
-          "s3:ListBucket"
-        ]
-        Resource = [
-          aws_s3_bucket.artifacts.arn,
-          "${aws_s3_bucket.artifacts.arn}/*"
-        ]
+        Sid      = "ListArtifactsBucket"
+        Effect   = "Allow"
+        Action   = ["s3:ListBucket"]
+        Resource = aws_s3_bucket.artifacts.arn
+      },
+      {
+        Sid      = "ReadArtifactsObjects"
+        Effect   = "Allow"
+        Action   = ["s3:GetObject"]
+        Resource = "${aws_s3_bucket.artifacts.arn}/*"
       }
     ]
   })
