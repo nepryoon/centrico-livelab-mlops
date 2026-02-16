@@ -16,7 +16,7 @@ from prometheus_client import (
     Histogram,
     generate_latest,
 )
-from starlette.responses import Response
+from starlette.responses import Response, HTMLResponse
 
 # OpenAI (optional at runtime: endpoint /explain works even without a key)
 try:
@@ -346,3 +346,869 @@ def explain(req: PredictRequest):
 def metrics():
     data = generate_latest(REGISTRY)
     return Response(content=data, media_type=CONTENT_TYPE_LATEST)
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+def dashboard():
+    """Interactive MLOps Dashboard with real-time predictions and system metrics"""
+    html_content = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Centrico LiveLab Dashboard</title>
+    
+    <!-- External Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #333;
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        /* Header Styles */
+        header {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        
+        h1 {
+            color: #667eea;
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+        
+        .subtitle {
+            color: #666;
+            font-size: 1.1em;
+            margin-bottom: 15px;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 6px 12px;
+            background: #667eea;
+            color: white;
+            border-radius: 20px;
+            font-size: 0.85em;
+            font-weight: 600;
+        }
+        
+        /* Grid Layout */
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .grid-2 {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        
+        /* Card Styles */
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 25px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            transition: transform 0.2s;
+        }
+        
+        .card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
+        }
+        
+        .card h2 {
+            color: #667eea;
+            font-size: 1.4em;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .full-width {
+            grid-column: 1 / -1;
+        }
+        
+        /* Status Indicators */
+        .status {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 15px;
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 0.9em;
+        }
+        
+        .status-ok {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .status-error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+        }
+        
+        .status-ok .status-dot {
+            background: #28a745;
+        }
+        
+        .status-error .status-dot {
+            background: #dc3545;
+        }
+        
+        /* Info Items */
+        .info-item {
+            margin: 12px 0;
+            padding: 12px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+        }
+        
+        .info-label {
+            font-weight: 600;
+            color: #495057;
+            display: block;
+            margin-bottom: 4px;
+            font-size: 0.9em;
+        }
+        
+        .info-value {
+            color: #212529;
+            font-size: 1.1em;
+        }
+        
+        /* Chart Container */
+        .chart-container {
+            position: relative;
+            height: 300px;
+            margin-top: 15px;
+        }
+        
+        /* Form Styles */
+        .form-group {
+            margin: 15px 0;
+        }
+        
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 1em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.3s;
+            width: 100%;
+        }
+        
+        button:hover {
+            background: #5568d3;
+        }
+        
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        
+        /* Prediction Result */
+        .prediction-result {
+            margin-top: 20px;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+            display: none;
+        }
+        
+        .prediction-result.show {
+            display: block;
+        }
+        
+        .prediction-result.positive {
+            background: #d4edda;
+            border: 2px solid #28a745;
+        }
+        
+        .prediction-result.negative {
+            background: #d1ecf1;
+            border: 2px solid #17a2b8;
+        }
+        
+        .prediction-value {
+            font-size: 2.5em;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+        
+        .prediction-confidence {
+            font-size: 1.2em;
+            color: #666;
+        }
+        
+        /* Metrics Grid */
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+        
+        .metric-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        
+        .metric-label {
+            font-size: 0.9em;
+            opacity: 0.9;
+            margin-bottom: 8px;
+        }
+        
+        .metric-value {
+            font-size: 2em;
+            font-weight: bold;
+        }
+        
+        /* Architecture Diagram */
+        .mermaid {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            display: flex;
+            justify-content: center;
+        }
+        
+        /* Control Panel */
+        .controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding: 15px;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        
+        .toggle-btn {
+            padding: 8px 16px;
+            background: #28a745;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            width: auto;
+        }
+        
+        .toggle-btn.paused {
+            background: #ffc107;
+        }
+        
+        .last-update {
+            color: #666;
+            font-size: 0.9em;
+        }
+        
+        /* Links */
+        .external-links {
+            display: flex;
+            gap: 15px;
+            margin-top: 15px;
+            flex-wrap: wrap;
+        }
+        
+        .external-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 18px;
+            background: #667eea;
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: 600;
+            transition: background 0.3s;
+        }
+        
+        .external-link:hover {
+            background: #5568d3;
+        }
+        
+        /* Footer */
+        footer {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            margin-top: 30px;
+            text-align: center;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            color: #666;
+        }
+        
+        /* Loading Spinner */
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(102, 126, 234, 0.3);
+            border-radius: 50%;
+            border-top-color: #667eea;
+            animation: spin 1s ease-in-out infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .error-message {
+            color: #dc3545;
+            padding: 10px;
+            background: #f8d7da;
+            border-radius: 6px;
+            margin: 10px 0;
+            display: none;
+        }
+        
+        .error-message.show {
+            display: block;
+        }
+        
+        /* Feature List */
+        .feature-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 10px;
+        }
+        
+        .feature-tag {
+            background: #e7f3ff;
+            color: #0056b3;
+            padding: 4px 10px;
+            border-radius: 15px;
+            font-size: 0.85em;
+            font-weight: 500;
+        }
+        
+        /* Responsive Design */
+        @media (max-width: 768px) {
+            h1 {
+                font-size: 1.8em;
+            }
+            
+            .grid, .grid-2 {
+                grid-template-columns: 1fr;
+            }
+            
+            .controls {
+                flex-direction: column;
+                gap: 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header>
+            <h1>🚀 Centrico LiveLab - MLOps Dashboard</h1>
+            <p class="subtitle">Real-time inference monitoring and system metrics</p>
+            <span class="badge" id="model-version-badge">Loading...</span>
+        </header>
+        
+        <!-- Control Panel -->
+        <div class="controls">
+            <div>
+                <button class="toggle-btn" id="auto-refresh-toggle" onclick="toggleAutoRefresh()">
+                    🟢 Auto-Refresh: ON
+                </button>
+            </div>
+            <div class="last-update">
+                Last update: <span id="last-update-time">Never</span>
+            </div>
+        </div>
+        
+        <!-- Architecture Diagram -->
+        <div class="card full-width">
+            <h2>📊 MLOps Architecture</h2>
+            <div class="mermaid">
+                graph LR
+                    A[Public APIs] --> B[Ingestion]
+                    A1[CityBikes API] --> B
+                    A2[Open-Meteo API] --> B
+                    B --> C[(PostgreSQL)]
+                    C --> D[Trainer]
+                    D --> E[Inference API]
+                    E --> F[Prometheus]
+                    F --> G[Grafana]
+                    
+                    style A fill:#e1f5ff
+                    style B fill:#fff9e6
+                    style C fill:#e8f5e9
+                    style D fill:#f3e5f5
+                    style E fill:#667eea,color:#fff
+                    style F fill:#ffe0b2
+                    style G fill:#ffcdd2
+            </div>
+        </div>
+        
+        <!-- System Health and Model Info -->
+        <div class="grid">
+            <!-- Health Status -->
+            <div class="card">
+                <h2>💚 System Health</h2>
+                <div id="health-status">
+                    <div class="loading"></div> Loading...
+                </div>
+                <div class="error-message" id="health-error"></div>
+            </div>
+            
+            <!-- Model Information -->
+            <div class="card">
+                <h2>🤖 Model Information</h2>
+                <div id="model-info">
+                    <div class="loading"></div> Loading...
+                </div>
+                <div class="error-message" id="model-error"></div>
+            </div>
+            
+            <!-- Metrics Summary -->
+            <div class="card">
+                <h2>📈 Metrics Summary</h2>
+                <div id="metrics-summary">
+                    <div class="loading"></div> Loading...
+                </div>
+                <div class="error-message" id="metrics-error"></div>
+            </div>
+        </div>
+        
+        <!-- Live Predictions Chart -->
+        <div class="card full-width">
+            <h2>📉 Live Predictions (Real-time)</h2>
+            <div class="chart-container">
+                <canvas id="predictions-chart"></canvas>
+            </div>
+        </div>
+        
+        <!-- Interactive Prediction Form -->
+        <div class="card">
+            <h2>🎯 Interactive Prediction</h2>
+            <div class="form-group">
+                <button onclick="triggerPrediction()" id="predict-btn">
+                    Get Prediction from Latest DB Data
+                </button>
+            </div>
+            <div class="prediction-result" id="prediction-result"></div>
+            <div class="error-message" id="prediction-error"></div>
+        </div>
+        
+        <!-- External Links -->
+        <div class="card">
+            <h2>🔗 External Services</h2>
+            <div class="external-links">
+                <a href="http://localhost:3000" target="_blank" class="external-link">
+                    📊 Grafana Dashboard
+                </a>
+                <a href="http://localhost:9090" target="_blank" class="external-link">
+                    🔥 Prometheus UI
+                </a>
+            </div>
+        </div>
+        
+        <!-- Footer -->
+        <footer>
+            <p><strong>Centrico LiveLab MLOps Pipeline</strong></p>
+            <p>Licensed under Apache 2.0 | End-to-End ML Pipeline Demo</p>
+        </footer>
+    </div>
+    
+    <script>
+        // Initialize Mermaid
+        mermaid.initialize({ startOnLoad: true, theme: 'default' });
+        
+        // Global state
+        let autoRefresh = true;
+        let predictionData = {
+            timestamps: [],
+            predictions: [],
+            probabilities: []
+        };
+        let predictionChart = null;
+        
+        // Initialize Chart
+        function initChart() {
+            const ctx = document.getElementById('predictions-chart');
+            predictionChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [
+                        {
+                            label: 'Prediction (y)',
+                            data: [],
+                            borderColor: '#667eea',
+                            backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                            tension: 0.4,
+                            yAxisID: 'y'
+                        },
+                        {
+                            label: 'Probability',
+                            data: [],
+                            borderColor: '#764ba2',
+                            backgroundColor: 'rgba(118, 75, 162, 0.1)',
+                            tension: 0.4,
+                            yAxisID: 'y1'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false,
+                    },
+                    scales: {
+                        y: {
+                            type: 'linear',
+                            display: true,
+                            position: 'left',
+                            min: 0,
+                            max: 1,
+                            title: {
+                                display: true,
+                                text: 'Prediction (0/1)'
+                            }
+                        },
+                        y1: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            min: 0,
+                            max: 1,
+                            title: {
+                                display: true,
+                                text: 'Probability'
+                            },
+                            grid: {
+                                drawOnChartArea: false,
+                            },
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top'
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Update timestamp
+        function updateTimestamp() {
+            const now = new Date().toLocaleTimeString();
+            document.getElementById('last-update-time').textContent = now;
+        }
+        
+        // Toggle auto-refresh
+        function toggleAutoRefresh() {
+            autoRefresh = !autoRefresh;
+            const btn = document.getElementById('auto-refresh-toggle');
+            if (autoRefresh) {
+                btn.textContent = '🟢 Auto-Refresh: ON';
+                btn.classList.remove('paused');
+            } else {
+                btn.textContent = '🔴 Auto-Refresh: OFF';
+                btn.classList.add('paused');
+            }
+        }
+        
+        // Fetch health status
+        async function fetchHealth() {
+            try {
+                const response = await fetch('/health');
+                const data = await response.json();
+                
+                const statusHtml = `
+                    <div class="info-item">
+                        <span class="info-label">Service Status</span>
+                        <div class="status status-ok">
+                            <span class="status-dot"></span>
+                            ${data.status.toUpperCase()}
+                        </div>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Model Loaded</span>
+                        <div class="status ${data.model_loaded ? 'status-ok' : 'status-error'}">
+                            <span class="status-dot"></span>
+                            ${data.model_loaded ? 'YES' : 'NO'}
+                        </div>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Model Version</span>
+                        <span class="info-value">${data.version}</span>
+                    </div>
+                `;
+                
+                document.getElementById('health-status').innerHTML = statusHtml;
+                document.getElementById('health-error').classList.remove('show');
+            } catch (error) {
+                document.getElementById('health-error').textContent = 'Failed to fetch health status';
+                document.getElementById('health-error').classList.add('show');
+            }
+        }
+        
+        // Fetch model info
+        async function fetchModelInfo() {
+            try {
+                const response = await fetch('/model');
+                if (response.status === 503) {
+                    throw new Error('Model not loaded');
+                }
+                const data = await response.json();
+                
+                // Update badge
+                document.getElementById('model-version-badge').textContent = `Model: ${data.version}`;
+                
+                const featuresHtml = data.features.map(f => 
+                    `<span class="feature-tag">${f}</span>`
+                ).join('');
+                
+                const infoHtml = `
+                    <div class="info-item">
+                        <span class="info-label">Version</span>
+                        <span class="info-value">${data.version}</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Feature Count</span>
+                        <span class="info-value">${data.features.length}</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Features</span>
+                        <div class="feature-list">
+                            ${featuresHtml}
+                        </div>
+                    </div>
+                `;
+                
+                document.getElementById('model-info').innerHTML = infoHtml;
+                document.getElementById('model-error').classList.remove('show');
+            } catch (error) {
+                document.getElementById('model-error').textContent = 'Model not loaded or unavailable';
+                document.getElementById('model-error').classList.add('show');
+                document.getElementById('model-version-badge').textContent = 'Model: Not Loaded';
+            }
+        }
+        
+        // Fetch metrics
+        async function fetchMetrics() {
+            try {
+                const response = await fetch('/metrics');
+                const text = await response.text();
+                
+                // Parse Prometheus metrics
+                const lines = text.split('\\n');
+                let totalRequests = 0;
+                let modelLoaded = 0;
+                
+                lines.forEach(line => {
+                    if (line.startsWith('http_requests_total{')) {
+                        const match = line.match(/}\\s+(\\d+)/);
+                        if (match) {
+                            totalRequests += parseInt(match[1]);
+                        }
+                    }
+                    if (line.startsWith('model_loaded ')) {
+                        const match = line.match(/model_loaded\\s+(\\d+)/);
+                        if (match) {
+                            modelLoaded = parseInt(match[1]);
+                        }
+                    }
+                });
+                
+                const metricsHtml = `
+                    <div class="metrics-grid">
+                        <div class="metric-card">
+                            <div class="metric-label">Total Requests</div>
+                            <div class="metric-value">${totalRequests}</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-label">Model Status</div>
+                            <div class="metric-value">${modelLoaded ? '✓' : '✗'}</div>
+                        </div>
+                    </div>
+                `;
+                
+                document.getElementById('metrics-summary').innerHTML = metricsHtml;
+                document.getElementById('metrics-error').classList.remove('show');
+            } catch (error) {
+                document.getElementById('metrics-error').textContent = 'Failed to fetch metrics';
+                document.getElementById('metrics-error').classList.add('show');
+            }
+        }
+        
+        // Fetch live prediction
+        async function fetchLivePrediction() {
+            try {
+                const response = await fetch('/predict', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({})
+                });
+                
+                if (response.status === 503) {
+                    return; // Model not loaded, skip update
+                }
+                
+                const data = await response.json();
+                
+                // Add to data arrays
+                const timestamp = new Date().toLocaleTimeString();
+                predictionData.timestamps.push(timestamp);
+                predictionData.predictions.push(data.y);
+                predictionData.probabilities.push(data.proba);
+                
+                // Keep only last 20 predictions
+                if (predictionData.timestamps.length > 20) {
+                    predictionData.timestamps.shift();
+                    predictionData.predictions.shift();
+                    predictionData.probabilities.shift();
+                }
+                
+                // Update chart
+                predictionChart.data.labels = predictionData.timestamps;
+                predictionChart.data.datasets[0].data = predictionData.predictions;
+                predictionChart.data.datasets[1].data = predictionData.probabilities;
+                predictionChart.update('none'); // No animation for smooth updates
+                
+            } catch (error) {
+                console.error('Failed to fetch live prediction:', error);
+            }
+        }
+        
+        // Trigger manual prediction
+        async function triggerPrediction() {
+            const btn = document.getElementById('predict-btn');
+            const resultDiv = document.getElementById('prediction-result');
+            const errorDiv = document.getElementById('prediction-error');
+            
+            btn.disabled = true;
+            btn.textContent = 'Predicting...';
+            resultDiv.classList.remove('show');
+            errorDiv.classList.remove('show');
+            
+            try {
+                const response = await fetch('/predict', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({})
+                });
+                
+                if (response.status === 503) {
+                    throw new Error('Model not loaded');
+                }
+                
+                const data = await response.json();
+                
+                const confidencePercent = (data.proba * 100).toFixed(1);
+                const predictionClass = data.y === 1 ? 'Positive (1)' : 'Negative (0)';
+                const resultClass = data.y === 1 ? 'positive' : 'negative';
+                
+                resultDiv.className = `prediction-result show ${resultClass}`;
+                resultDiv.innerHTML = `
+                    <div class="prediction-value">${predictionClass}</div>
+                    <div class="prediction-confidence">Confidence: ${confidencePercent}%</div>
+                    <div style="margin-top: 10px; font-size: 0.9em; color: #666;">
+                        Model version: ${data.version}
+                    </div>
+                `;
+                
+            } catch (error) {
+                errorDiv.textContent = error.message || 'Prediction failed';
+                errorDiv.classList.add('show');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Get Prediction from Latest DB Data';
+            }
+        }
+        
+        // Update all data
+        async function updateDashboard() {
+            if (!autoRefresh) return;
+            
+            await Promise.all([
+                fetchHealth(),
+                fetchModelInfo(),
+                fetchMetrics(),
+                fetchLivePrediction()
+            ]);
+            
+            updateTimestamp();
+        }
+        
+        // Initialize dashboard
+        async function init() {
+            initChart();
+            await updateDashboard();
+            
+            // Set up auto-refresh every 5 seconds
+            setInterval(() => {
+                if (autoRefresh) {
+                    updateDashboard();
+                }
+            }, 5000);
+        }
+        
+        // Start when page loads
+        window.addEventListener('load', init);
+    </script>
+</body>
+</html>
+    """
+    return HTMLResponse(content=html_content)

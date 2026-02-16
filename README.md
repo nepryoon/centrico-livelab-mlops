@@ -211,6 +211,29 @@ The inference service mounts `./artifacts` read-only, loads the model and serves
   - body `{}` → uses **latest DB snapshot**
   - body `{"features": {...}}` → predict on provided features
 - `GET /metrics` → Prometheus metrics
+- `GET /dashboard` → **Interactive MLOps Dashboard** (see below)
+
+### Interactive Dashboard
+
+Access the real-time MLOps dashboard at: **http://localhost:8000/dashboard**
+
+The dashboard provides an interactive web interface with:
+
+- **MLOps Architecture Diagram**: Visual representation of the pipeline using Mermaid.js
+- **System Health Status**: Live monitoring of service status and model availability
+- **Model Information**: Display of current model version, features, and metadata
+- **Real-time Predictions Chart**: Auto-updating line chart showing prediction trends (Chart.js)
+- **Interactive Prediction Form**: Manually trigger predictions using latest DB data
+- **Metrics Summary**: Parsed Prometheus metrics with key performance indicators
+- **Auto-Refresh Control**: Toggle to pause/resume live updates (5-second intervals)
+- **External Links**: Quick access to Grafana (port 3000) and Prometheus (port 9090)
+
+The dashboard is:
+- Self-contained (embedded CSS/JavaScript)
+- Responsive (works on desktop and tablet)
+- Real-time (updates every 5 seconds)
+- No authentication required
+- Built with CDN-hosted libraries (Mermaid.js, Chart.js)
 
 ### Example
 
@@ -220,6 +243,9 @@ curl -s http://localhost:8000/model
 curl -sS -w "\nHTTP %{http_code}\n" -X POST "http://localhost:8000/predict" \
   -H "Content-Type: application/json" \
   -d '{}'
+
+# Open dashboard in browser
+open http://localhost:8000/dashboard
 ```
 
 ---
