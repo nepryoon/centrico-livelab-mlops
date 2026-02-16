@@ -6,6 +6,8 @@ on:
     paths:
       - "services/inference/**"
       - ".github/workflows/cd-staging.yml"
+    paths-ignore:
+      - "**/*.md"
   workflow_dispatch:
 
 permissions:
@@ -31,9 +33,9 @@ jobs:
       ECS_SERVICE: ${{ vars.ECS_SERVICE }}
       ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
 
-      CONTAINER_NAME: ${{ vars.CONTAINER_NAME }}
+      CONTAINER_NAME: ${{ vars.CONTAINER_NAME || 'inference' }}
 
-      # ✅ IMPORTANT: do NOT use DOCKER_CONTEXT (reserved by Docker CLI)
+      # ⚠️ NON usare DOCKER_CONTEXT: Docker CLI lo interpreta come "docker context"
       BUILD_CONTEXT: services/inference
       DOCKERFILE_PATH: services/inference/Dockerfile
 
@@ -65,7 +67,6 @@ jobs:
           IMAGE_TAG="${GITHUB_SHA}"
           IMAGE_URI_SHA="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}:${IMAGE_TAG}"
           IMAGE_URI_BOOTSTRAP="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}:bootstrap"
-          echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
           echo "image_uri_sha=${IMAGE_URI_SHA}" >> "$GITHUB_OUTPUT"
           echo "image_uri_bootstrap=${IMAGE_URI_BOOTSTRAP}" >> "$GITHUB_OUTPUT"
 
@@ -73,7 +74,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           docker build \
             -f "${DOCKERFILE_PATH}" \
             -t "${{ steps.image.outputs.image_uri_sha }}" \
@@ -93,8 +93,6 @@ jobs:
             --services "${ECS_SERVICE}" \
             --query 'services[0].taskDefinition' \
             --output text)"
-
-          echo "Current task definition: ${TASK_DEF_ARN}"
 
           aws ecs describe-task-definition \
             --task-definition "${TASK_DEF_ARN}" \
@@ -121,8 +119,6 @@ jobs:
             --query 'taskDefinition.taskDefinitionArn' \
             --output text)"
 
-          echo "New task definition: ${NEW_TASK_DEF_ARN}"
-
           aws ecs update-service \
             --cluster "${ECS_CLUSTER}" \
             --service "${ECS_SERVICE}" \
@@ -139,17 +135,12 @@ jobs:
         run: |
           set -euo pipefail
           URL="${ALB_URL}/health"
-          echo "Smoke test: ${URL}"
-
           for i in {1..15}; do
             if curl -fsS "${URL}" >/dev/null; then
               echo "OK"
               exit 0
             fi
-            echo "Not ready yet (attempt ${i}/15) - sleeping 5s"
             sleep 5
           done
-
-          echo "Smoke test failed after retries"
           curl -i "${URL}" || true
           exit 1
