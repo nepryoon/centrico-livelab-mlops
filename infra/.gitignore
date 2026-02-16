@@ -1,0 +1,21 @@
+# Terraform local state (must never be committed)
+**/.terraform/
+**/terraform.tfstate
+**/terraform.tfstate.*
+**/.terraform.tfstate.lock.info
+**/crash.log
+**/crash.*.log
+
+# Sensitive tfvars (optional: keep them out of git)
+**/*.tfvars
+**/*.tfvars.json
+
+# Terraform CLI plans
+**/*.tfplan
+**/*.plan
+
+# Override files (rare, but can contain local overrides)
+**/*_override.tf
+**/*_override.tf.json
+**/override.tf
+**/override.tf.json
