@@ -1,0 +1,6 @@
+services:
+  inference:
+    build:
+      context: ./services/inference
+    ports:
+      - "8000:8000"
