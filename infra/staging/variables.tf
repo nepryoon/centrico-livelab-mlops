@@ -4,6 +4,12 @@ variable "aws_region" {
   default     = "eu-south-1"
 }
 
+variable "app_prefix" {
+  description = "Prefix used for naming AWS resources"
+  type        = string
+  default     = "centrico-livelab"
+}
+
 variable "db_password" {
   description = "RDS master password (8-128 chars). Must not contain space, /, \", @."
   type        = string
