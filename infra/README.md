@@ -44,8 +44,31 @@ After apply, note the outputs:
 - `ecs_cluster_name`, `ecs_service_name`
 - `ecr_repo_url_inference`
 - `db_endpoint`
+- `artifacts_bucket` (S3 bucket for model artifacts)
+- `artifacts_s3_uri_latest` (S3 URI for latest model version)
 
-## 3) GitHub Actions CD (build/push + deploy)
+## 3) Model Artifacts Auto-load
+The ECS inference service automatically loads model artifacts from S3 on container startup:
+- **S3 Location**: `s3://{artifacts_bucket}/models/latest/`
+- **Container Path**: `/artifacts`
+- **Mechanism**: The `entrypoint.sh` script runs `aws s3 sync` before starting the API server
+- **Permissions**: ECS task role has `s3:GetObject` and `s3:ListBucket` permissions
+
+To publish a new model:
+```bash
+# Upload artifacts to S3
+aws s3 sync ./artifacts s3://{artifacts_bucket}/models/latest/ --delete
+
+# Trigger ECS service redeployment
+aws ecs update-service \
+  --cluster {ecs_cluster_name} \
+  --service {ecs_service_name} \
+  --force-new-deployment
+```
+
+Or use the GitHub Actions workflow: `.github/workflows/train-publish-staging.yml`
+
+## 4) GitHub Actions CD (build/push + deploy)
 Copy `.github/workflows/cd-staging.yml` into your repo.
 
 Then, in GitHub:
