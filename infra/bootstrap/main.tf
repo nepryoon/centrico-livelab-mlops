@@ -1,7 +1,7 @@
 data "aws_caller_identity" "current" {}
 
 locals {
-  prefix        = "centrico-livelab"
+  prefix         = "centrico-livelab"
   tfstate_bucket = "centrico-livelab-tfstate-102724112773"
   tflock_table   = "centrico-livelab-tflock"
   role_name      = "centrico-mlops-gha-staging"
@@ -40,8 +40,8 @@ resource "aws_dynamodb_table" "tflock" {
 
 # --- GitHub OIDC provider ---
 resource "aws_iam_openid_connect_provider" "github" {
-  url             = "https://token.actions.githubusercontent.com"
-  client_id_list  = ["sts.amazonaws.com"]
+  url            = "https://token.actions.githubusercontent.com"
+  client_id_list = ["sts.amazonaws.com"]
   # AWS requires a thumbprint; GitHub's is commonly set to this value
   thumbprint_list = ["6938fd4d98bab03faadb97b34396831e3780aea1"]
 }
@@ -72,9 +72,9 @@ resource "aws_iam_role" "gha_staging" {
 # --- Minimal policy for CD: ECR push + ECS deploy (+ PassRole to ECS roles) ---
 data "aws_iam_policy_document" "gha_cd" {
   statement {
-    sid     = "ECRAuth"
-    effect  = "Allow"
-    actions = ["ecr:GetAuthorizationToken"]
+    sid       = "ECRAuth"
+    effect    = "Allow"
+    actions   = ["ecr:GetAuthorizationToken"]
     resources = ["*"]
   }
 
@@ -109,8 +109,8 @@ data "aws_iam_policy_document" "gha_cd" {
   }
 
   statement {
-    sid    = "PassRoleToECS"
-    effect = "Allow"
+    sid     = "PassRoleToECS"
+    effect  = "Allow"
     actions = ["iam:PassRole"]
     resources = [
       "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${local.prefix}-ecs-task-exec-*",

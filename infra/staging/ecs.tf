@@ -1,20 +1,41 @@
+locals {
+  name_prefix = "${var.app_prefix}-${var.environment}"
+
+  openai_secrets = var.openai_api_key_secret_arn != "" ? [
+    {
+      name      = "OPENAI_API_KEY"
+      valueFrom = var.openai_api_key_secret_arn
+    }
+  ] : []
+
+  explain_env = var.explain_token != "" ? [
+    {
+      name  = "EXPLAIN_TOKEN"
+      value = var.explain_token
+    }
+  ] : []
+}
+
 resource "aws_cloudwatch_log_group" "inference" {
-  name              = "/ecs/centrico-livelab/inference"
+  name              = "/ecs/${var.app_prefix}/inference"
   retention_in_days = 14
 }
 
 resource "aws_ecs_cluster" "this" {
-  name = "centrico-livelab-stg"
+  name = local.name_prefix
 }
 
 resource "aws_iam_role" "ecs_task_execution" {
-  name = "centrico-livelab-ecs-task-exec-stg"
+  name = "${var.app_prefix}-ecs-task-exec-${var.environment}"
+
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Effect    = "Allow"
-      Action    = "sts:AssumeRole"
-      Principal = { Service = "ecs-tasks.amazonaws.com" }
+      Effect = "Allow"
+      Action = "sts:AssumeRole"
+      Principal = {
+        Service = "ecs-tasks.amazonaws.com"
+      }
     }]
   })
 }
@@ -24,49 +45,62 @@ resource "aws_iam_role_policy_attachment" "ecs_task_execution" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
+# Allow ECS execution role to read OpenAI secret (if configured)
+resource "aws_iam_policy" "ecs_task_secrets_read" {
+  name = "${var.app_prefix}-ecs-exec-secrets-read-${var.environment}"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = concat(
+      var.openai_api_key_secret_arn != "" ? [
+        {
+          Sid      = "ReadOpenAISecret"
+          Effect   = "Allow"
+          Action   = ["secretsmanager:GetSecretValue"]
+          Resource = var.openai_api_key_secret_arn
+        }
+      ] : [],
+      [
+        {
+          Sid    = "KmsDecryptViaSecretsManager"
+          Effect = "Allow"
+          Action = ["kms:Decrypt"]
+          Resource = "*"
+          Condition = {
+            StringEquals = {
+              "kms:ViaService" = "secretsmanager.${var.aws_region}.amazonaws.com"
+            }
+          }
+        }
+      ]
+    )
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "ecs_task_secrets_read" {
+  role       = aws_iam_role.ecs_task_execution.name
+  policy_arn = aws_iam_policy.ecs_task_secrets_read.arn
+}
+
 resource "aws_iam_role" "ecs_task_role" {
-  name = "centrico-livelab-ecs-task-role-stg"
+  name = "${var.app_prefix}-ecs-task-role-${var.environment}"
+
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Effect    = "Allow"
-      Action    = "sts:AssumeRole"
-      Principal = { Service = "ecs-tasks.amazonaws.com" }
+      Effect = "Allow"
+      Action = "sts:AssumeRole"
+      Principal = {
+        Service = "ecs-tasks.amazonaws.com"
+      }
     }]
   })
 }
 
-# ✅ allow ECS task to read artifacts from S3
-resource "aws_iam_policy" "ecs_task_s3_artifacts_read" {
-  name = "centrico-livelab-ecs-task-s3-artifacts-read-stg"
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid      = "ListBucket"
-        Effect   = "Allow"
-        Action   = ["s3:ListBucket"]
-        Resource = aws_s3_bucket.artifacts.arn
-      },
-      {
-        Sid      = "GetObjects"
-        Effect   = "Allow"
-        Action   = ["s3:GetObject"]
-        Resource = "${aws_s3_bucket.artifacts.arn}/*"
-      }
-    ]
-  })
-}
-
-resource "aws_iam_role_policy_attachment" "ecs_task_s3_artifacts_read" {
-  role       = aws_iam_role.ecs_task_role.name
-  policy_arn = aws_iam_policy.ecs_task_s3_artifacts_read.arn
-}
-
 resource "aws_ecs_task_definition" "inference" {
-  family                   = "centrico-livelab-inference"
-  network_mode             = "awsvpc"
+  family                   = "${var.app_prefix}-inference"
   requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
   cpu                      = "256"
   memory                   = "512"
 
@@ -80,14 +114,10 @@ resource "aws_ecs_task_definition" "inference" {
       essential = true
 
       portMappings = [
-        { containerPort = 8000, hostPort = 8000, protocol = "tcp" }
-      ]
-
-      environment = [
-        { name = "AWS_REGION", value = var.aws_region },
-        { name = "PORT", value = "8000" },
-        { name = "ARTIFACT_DIR", value = "/artifacts" },
-        { name = "ARTIFACT_S3_URI", value = "s3://${aws_s3_bucket.artifacts.bucket}/models/latest/" }
+        {
+          containerPort = 8000
+          protocol      = "tcp"
+        }
       ]
 
       logConfiguration = {
@@ -98,22 +128,41 @@ resource "aws_ecs_task_definition" "inference" {
           awslogs-stream-prefix = "ecs"
         }
       }
+
+      environment = concat(
+        [
+          { name = "ARTIFACT_DIR", value = "/artifacts" },
+
+          # DB
+          { name = "POSTGRES_HOST", value = aws_db_instance.postgres.address },
+          { name = "POSTGRES_PORT", value = "5432" },
+          { name = "POSTGRES_DB", value = "livelab" },
+          { name = "POSTGRES_USER", value = var.db_username },
+          { name = "POSTGRES_PASSWORD", value = var.db_password },
+
+          # LLM toggles
+          { name = "LLM_ENABLED", value = tostring(var.llm_enabled) },
+          { name = "OPENAI_MODEL", value = var.openai_model }
+        ],
+        local.explain_env
+      )
+
+      secrets = local.openai_secrets
     }
   ])
 }
 
-# service + LB resources sono in networking.tf (target group / ALB / SG)
 resource "aws_ecs_service" "inference" {
   name            = "inference"
   cluster         = aws_ecs_cluster.this.id
-  launch_type     = "FARGATE"
-  desired_count   = 1
   task_definition = aws_ecs_task_definition.inference.arn
+  desired_count   = 1
+  launch_type     = "FARGATE"
 
   network_configuration {
+    assign_public_ip = true
     subnets          = data.aws_subnets.default.ids
     security_groups  = [aws_security_group.ecs_tasks.id]
-    assign_public_ip = true
   }
 
   load_balancer {
