@@ -1,5 +1,3 @@
-data "aws_caller_identity" "current" {}
-
 resource "aws_s3_bucket" "artifacts" {
   bucket = "centrico-livelab-artifacts-${data.aws_caller_identity.current.account_id}-${var.aws_region}"
 }

@@ -12,8 +12,8 @@ resource "aws_iam_role" "ecs_task_execution" {
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Effect = "Allow"
-      Action = "sts:AssumeRole"
+      Effect    = "Allow"
+      Action    = "sts:AssumeRole"
       Principal = { Service = "ecs-tasks.amazonaws.com" }
     }]
   })
@@ -29,8 +29,8 @@ resource "aws_iam_role" "ecs_task_role" {
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Effect = "Allow"
-      Action = "sts:AssumeRole"
+      Effect    = "Allow"
+      Action    = "sts:AssumeRole"
       Principal = { Service = "ecs-tasks.amazonaws.com" }
     }]
   })
@@ -43,15 +43,15 @@ resource "aws_iam_policy" "ecs_task_s3_artifacts_read" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "ListBucket"
-        Effect = "Allow"
-        Action = ["s3:ListBucket"]
+        Sid      = "ListBucket"
+        Effect   = "Allow"
+        Action   = ["s3:ListBucket"]
         Resource = aws_s3_bucket.artifacts.arn
       },
       {
-        Sid    = "GetObjects"
-        Effect = "Allow"
-        Action = ["s3:GetObject"]
+        Sid      = "GetObjects"
+        Effect   = "Allow"
+        Action   = ["s3:GetObject"]
         Resource = "${aws_s3_bucket.artifacts.arn}/*"
       }
     ]
