@@ -1,0 +1,71 @@
+name: Train + Publish Model (staging)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: eu-south-1
+  AWS_ROLE_ARN: arn:aws:iam::102724112773:role/centrico-mlops-gha-staging
+  ARTIFACTS_S3_URI: s3://centrico-livelab-artifacts-102724112773-eu-south-1/models/latest/
+  ECS_CLUSTER: centrico-livelab-stg
+  ECS_SERVICE: inference
+
+jobs:
+  train_publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Build trainer image
+        run: |
+          docker build -f services/trainer/Dockerfile -t livelab-trainer:ci services/trainer
+
+      - name: Run training (produce ./artifacts)
+        run: |
+          rm -rf artifacts
+          mkdir -p artifacts
+          docker run --rm \
+            -e ARTIFACT_DIR=/artifacts \
+            -v "$PWD/artifacts:/artifacts" \
+            livelab-trainer:ci
+
+      - name: Read model_version from metadata.json
+        id: mv
+        run: |
+          python3 - <<'PY'
+          import json
+          v = json.load(open("artifacts/metadata.json"))["model_version"]
+          print(f"MODEL_VERSION={v}")
+          PY | tee -a $GITHUB_ENV
+
+      - name: Upload versioned artifacts + update latest
+        env:
+          BUCKET_BASE: s3://centrico-livelab-artifacts-102724112773-eu-south-1/models
+        run: |
+          aws s3 sync artifacts "${BUCKET_BASE}/${MODEL_VERSION}/" --region "${AWS_REGION}"
+          aws s3 sync artifacts "${BUCKET_BASE}/latest/" --delete --region "${AWS_REGION}"
+
+      - name: Force new ECS deployment
+        run: |
+          aws ecs update-service \
+            --region "${AWS_REGION}" \
+            --cluster "${ECS_CLUSTER}" \
+            --service "${ECS_SERVICE}" \
+            --force-new-deployment > /dev/null
+
+          aws ecs wait services-stable \
+            --region "${AWS_REGION}" \
+            --cluster "${ECS_CLUSTER}" \
+            --services "${ECS_SERVICE}"
