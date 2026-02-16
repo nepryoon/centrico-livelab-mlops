@@ -1,15 +1,16 @@
 services:
-  inference:
+  trainer:
     build:
-      context: ./services/inference
-    ports:
-      - "8000:8000"
+      context: ./services/trainer
     environment:
-      - ARTIFACT_DIR=/artifacts
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
       - POSTGRES_DB=livelab
       - POSTGRES_USER=app
       - POSTGRES_PASSWORD=app
+      - ARTIFACT_DIR=/artifacts
     volumes:
-      - ./artifacts:/artifacts:ro
+      - ./artifacts:/artifacts
+    depends_on:
+      postgres:
+        condition: service_healthy

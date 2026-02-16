@@ -1,0 +1,11 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Artifacts
+artifacts/
+ci_artifacts/
+
+# OS
+.DS_Store

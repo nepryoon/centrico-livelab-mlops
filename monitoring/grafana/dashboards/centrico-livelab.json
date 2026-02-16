@@ -1,0 +1,48 @@
+{
+  "uid": "centrico-livelab",
+  "title": "Centrico LiveLab - Inference Overview",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Inference UP",
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+      "targets": [
+        { "expr": "up{job=\"inference\"}", "refId": "A" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "RPS /predict (1m)",
+      "gridPos": { "x": 6, "y": 0, "w": 18, "h": 8 },
+      "targets": [
+        { "expr": "sum(rate(http_requests_total{endpoint=\"/predict\"}[1m]))", "refId": "A" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "p95 latency /predict (1m)",
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{endpoint=\"/predict\"}[1m])))",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Error rate (non-200) /predict (5m)",
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "sum(rate(http_requests_total{endpoint=\"/predict\",status!=\"200\"}[5m]))",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}

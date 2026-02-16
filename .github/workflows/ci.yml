@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dev deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+          # install service deps needed by tests
+          pip install -r services/inference/requirements.txt
+          pip install -r services/trainer/requirements.txt
+
+      - name: Run tests
+        run: pytest -q
+
+      - name: Model quality gate (explicit)
+        run: |
+          mkdir -p ci_artifacts
+          python services/trainer/app/train.py --synthetic --n-samples 400 --artifact-dir ci_artifacts
+          python - <<'PY'
+          import json
+          with open("ci_artifacts/metrics.json") as f:
+              m = json.load(f)
+          f1 = float(m["f1"])
+          assert f1 >= 0.60, f"F1 gate failed: {f1}"
+          print("Model gate OK. F1=", f1)
+          PY
+
+      - name: Upload CI artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci_artifacts
+          path: ci_artifacts

@@ -1,0 +1,39 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_DB=livelab
+      - POSTGRES_USER=app
+      - POSTGRES_PASSWORD=app
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d livelab"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  ingestion:
+    build:
+      context: ./services/ingestion
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=livelab
+      - POSTGRES_USER=app
+      - POSTGRES_PASSWORD=app
+
+      # Public APIs (defaults you can change later)
+      - BIKE_NETWORK_ID=bicincitta-siena
+      - LAT=45.0703
+      - LON=7.6869
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["python", "app/collector.py", "--once"]
+
+volumes:
+  pgdata:
