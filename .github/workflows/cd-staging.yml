@@ -6,8 +6,6 @@ on:
     paths:
       - "services/inference/**"
       - ".github/workflows/cd-staging.yml"
-    paths-ignore:
-      - "**/*.md"
   workflow_dispatch:
 
 permissions:
@@ -44,14 +42,53 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Decide whether to deploy (skip if only .md changed)
+        id: changes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          BEFORE="${{ github.event.before }}"
+          SHA="${{ github.sha }}"
+
+          # On some pushes, 'before' can be all zeros. Fallback to previous commit.
+          if [[ "$BEFORE" == "0000000000000000000000000000000000000000" ]]; then
+            BEFORE="$(git rev-parse "${SHA}~1" 2>/dev/null || echo "")"
+          fi
+
+          if [[ -z "$BEFORE" ]]; then
+            echo "deploy_needed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          CHANGED="$(git diff --name-only "$BEFORE" "$SHA" || true)"
+          echo "Changed files:"
+          echo "$CHANGED"
+
+          # Deploy if there is at least one non-markdown file changed
+          if echo "$CHANGED" | grep -qvE '\.md$'; then
+            echo "deploy_needed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "deploy_needed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip notice
+        if: ${{ steps.changes.outputs.deploy_needed != 'true' }}
+        run: |
+          echo "Only markdown changes detected -> skipping deploy."
 
       - name: Configure AWS credentials (OIDC)
+        if: ${{ steps.changes.outputs.deploy_needed == 'true' }}
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ env.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to Amazon ECR (password-stdin)
+        if: ${{ steps.changes.outputs.deploy_needed == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -60,6 +97,7 @@ jobs:
               "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 
       - name: Compute image URIs
+        if: ${{ steps.changes.outputs.deploy_needed == 'true' }}
         id: image
         shell: bash
         run: |
@@ -71,9 +109,11 @@ jobs:
           echo "image_uri_bootstrap=${IMAGE_URI_BOOTSTRAP}" >> "$GITHUB_OUTPUT"
 
       - name: Build & Push Docker images to ECR (sha + bootstrap)
+        if: ${{ steps.changes.outputs.deploy_needed == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
+
           docker build \
             -f "${DOCKERFILE_PATH}" \
             -t "${{ steps.image.outputs.image_uri_sha }}" \
@@ -84,6 +124,7 @@ jobs:
           docker push "${{ steps.image.outputs.image_uri_bootstrap }}"
 
       - name: Deploy to ECS (register new task def + update service)
+        if: ${{ steps.changes.outputs.deploy_needed == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -130,17 +171,22 @@ jobs:
             --services "${ECS_SERVICE}"
 
       - name: Smoke test (optional, with retry)
-        if: ${{ env.ALB_URL != '' }}
+        if: ${{ steps.changes.outputs.deploy_needed == 'true' && env.ALB_URL != '' }}
         shell: bash
         run: |
           set -euo pipefail
           URL="${ALB_URL}/health"
+          echo "Smoke test: ${URL}"
+
           for i in {1..15}; do
             if curl -fsS "${URL}" >/dev/null; then
               echo "OK"
               exit 0
             fi
+            echo "Not ready yet (attempt ${i}/15) - sleeping 5s"
             sleep 5
           done
+
+          echo "Smoke test failed after retries"
           curl -i "${URL}" || true
           exit 1
