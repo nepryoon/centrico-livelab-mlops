@@ -1,0 +1,144 @@
+name: CD - Staging (ECS)
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "services/inference/**"
+      - ".github/workflows/cd-staging.yml"
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: cd-staging
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Build, push to ECR, deploy to ECS (staging)
+    runs-on: ubuntu-latest
+    environment: staging
+
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+      AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+
+      # ECS / ECR
+      ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
+      ECS_SERVICE: ${{ vars.ECS_SERVICE }}
+      ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+
+      # Container name inside the task definition
+      CONTAINER_NAME: ${{ vars.CONTAINER_NAME }}
+
+      # Build context / dockerfile
+      DOCKER_CONTEXT: services/inference
+      DOCKERFILE_PATH: services/inference/Dockerfile
+
+      # Optional: for smoke test after deploy (set it as env var in GitHub)
+      ALB_URL: ${{ vars.ALB_URL }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Compute image URI
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE_TAG="${GITHUB_SHA}"
+          IMAGE_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}:${IMAGE_TAG}"
+          echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "image_uri=${IMAGE_URI}" >> "$GITHUB_OUTPUT"
+
+      - name: Build & Push Docker image to ECR
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build \
+            -f "${DOCKERFILE_PATH}" \
+            -t "${{ steps.image.outputs.image_uri }}" \
+            "${DOCKER_CONTEXT}"
+
+          docker push "${{ steps.image.outputs.image_uri }}"
+
+      - name: Deploy to ECS (register new task def + update service)
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Get current task definition ARN from the service
+          TASK_DEF_ARN="$(aws ecs describe-services \
+            --cluster "${ECS_CLUSTER}" \
+            --services "${ECS_SERVICE}" \
+            --query 'services[0].taskDefinition' \
+            --output text)"
+
+          echo "Current task definition: ${TASK_DEF_ARN}"
+
+          # Fetch current task definition JSON
+          aws ecs describe-task-definition \
+            --task-definition "${TASK_DEF_ARN}" \
+            --query 'taskDefinition' \
+            --output json > taskdef.json
+
+          # Create a new task definition JSON:
+          # - update container image for CONTAINER_NAME
+          # - strip read-only fields that RegisterTaskDefinition won't accept
+          jq --arg IMAGE "${{ steps.image.outputs.image_uri }}" \
+             --arg NAME "${CONTAINER_NAME}" \
+             '
+             .containerDefinitions |= (map(if .name == $NAME then .image = $IMAGE else . end)) |
+             del(
+               .taskDefinitionArn,
+               .revision,
+               .status,
+               .requiresAttributes,
+               .compatibilities,
+               .registeredAt,
+               .registeredBy
+             )
+             ' taskdef.json > taskdef-new.json
+
+          # Register new task definition
+          NEW_TASK_DEF_ARN="$(aws ecs register-task-definition \
+            --cli-input-json file://taskdef-new.json \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)"
+
+          echo "New task definition: ${NEW_TASK_DEF_ARN}"
+
+          # Update ECS service to new task definition
+          aws ecs update-service \
+            --cluster "${ECS_CLUSTER}" \
+            --service "${ECS_SERVICE}" \
+            --task-definition "${NEW_TASK_DEF_ARN}" \
+            --force-new-deployment > /dev/null
+
+          # Wait until service is stable
+          aws ecs wait services-stable \
+            --cluster "${ECS_CLUSTER}" \
+            --services "${ECS_SERVICE}"
+
+      - name: Smoke test (optional)
+        if: ${{ env.ALB_URL != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Hitting: ${ALB_URL}/health"
+          curl -fsS "${ALB_URL}/health" | head -c 500
+          echo
