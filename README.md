@@ -303,12 +303,86 @@ The same pattern maps cleanly to Open Banking use-cases (credit/marketing propen
 
 ---
 
-## Roadmap (next steps)
+## Roadmap (COMPLETED ✅)
 
-- Step 7: **AWS deployment** (OIDC → ECR → staging deploy) + Terraform + GitHub Environments
-- Step 8: alerts + retraining trigger (Prometheus alert rules + scheduled trainer)
-- Step 9: optional **LLM block** (RAG over model cards/run logs + “explain prediction” endpoint)
+- **Step 7**: ✅ **AWS deployment** (OIDC → ECR → staging deploy) + Terraform + GitHub Environments
+- **Step 8**: ✅ **Alerts + retraining trigger** (Prometheus alert rules + AlertManager + scheduled trainer)
+- **Step 9**: ✅ **LLM block** (OpenAI integration for `/explain` endpoint with prediction explanations)
 
+### Latest Additions (Step 8 & 9)
+
+#### Prometheus Alerts & AlertManager
+- **Alert Rules** (`monitoring/prometheus/alert.rules.yml`):
+  - `ModelNotLoaded` - Critical alert when model fails to load
+  - `HighErrorRate` - Warning when error rate > 5%
+  - `HighPredictionLatency` - Warning when P95 latency > 1 second
+  - `InferenceServiceDown` - Critical alert when service is unreachable
+  - `LowPredictionVolume` - Info alert for potential data pipeline issues
+
+- **AlertManager** (`monitoring/prometheus/alertmanager.yml`):
+  - Configured with grouping, inhibition rules, and webhook support
+  - Ready for Slack/PagerDuty integration (webhook configs included as examples)
+  - Access UI at http://localhost:9093
+
+#### Scheduled Retraining
+- **Workflow** (`.github/workflows/scheduled-retrain.yml`):
+  - Runs daily at 2 AM UTC (configurable via cron)
+  - Includes model quality gate (F1 >= 0.60)
+  - Automatic S3 artifact upload and ECS deployment
+  - Manual trigger available via GitHub UI
+
+#### LLM Explain Endpoint
+- **Fixed OpenAI API integration** in `/explain` endpoint
+- Uses `gpt-4o-mini` for cost-efficient explanations
+- Italian language output by default
+- Graceful fallback when API key not configured
+
+---
+
+## Monitoring & Alerts
+
+### Prometheus UI
+- http://localhost:9090
+- View active alerts, metrics, and rule status
+
+### AlertManager UI  
+- http://localhost:9093
+- View fired alerts, silences, and notification status
+
+### Grafana Dashboards
+- http://localhost:3000 (admin/admin)
+- Pre-configured datasource for Prometheus
+- Create custom dashboards for model metrics
+
+### Configuring Alert Notifications
+
+Edit `monitoring/prometheus/alertmanager.yml` to add Slack/webhook notifications:
+
+```yaml
+receivers:
+  - name: 'critical-alerts'
+    webhook_configs:
+      - url: 'https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK'
+        send_resolved: true
+```
+
+---
+
+## Scheduled Retraining
+
+The pipeline automatically retrains the model daily. To trigger manually:
+
+```bash
+gh workflow run scheduled-retrain.yml
+```
+
+Or via GitHub UI: Actions → Scheduled Retraining → Run workflow
+
+The workflow:
+1. Fetches fresh data from CityBikes & Open-Meteo
+2. Trains a new model with quality gate check
+3. Uploads artifacts to S3 (versioned + latest)
+4. Triggers ECS service redeployment
 ---
 
 ## License

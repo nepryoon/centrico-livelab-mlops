@@ -1,0 +1,140 @@
+name: Scheduled Retraining
+
+on:
+  # Run daily at 2 AM UTC
+  schedule:
+    - cron: '0 2 * * *'
+  # Allow manual trigger
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: eu-south-1
+  AWS_ROLE_ARN: arn:aws:iam::102724112773:role/centrico-mlops-gha-staging
+
+  ARTIFACTS_S3_BUCKET: centrico-livelab-artifacts-102724112773-eu-south-1
+  ARTIFACTS_S3_PREFIX: models
+
+  ECS_CLUSTER: centrico-livelab-stg
+  ECS_SERVICE: inference
+
+jobs:
+  scheduled_retrain:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: livelab
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: app
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U app -d livelab"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Wait for Postgres
+        run: |
+          for i in $(seq 1 60); do
+            docker run --rm --network host postgres:16-alpine \
+              pg_isready -h 127.0.0.1 -p 5432 -U app -d livelab && exit 0
+            sleep 2
+          done
+          echo "Postgres not ready" && exit 1
+
+      - name: Build ingestion image
+        run: |
+          docker build -f services/ingestion/Dockerfile -t livelab-ingestion:ci services/ingestion
+
+      - name: Run ingestion (populate raw tables)
+        run: |
+          docker run --rm --network host \
+            -e POSTGRES_HOST=127.0.0.1 \
+            -e POSTGRES_PORT=5432 \
+            -e POSTGRES_DB=livelab \
+            -e POSTGRES_USER=app \
+            -e POSTGRES_PASSWORD=app \
+            livelab-ingestion:ci
+
+      - name: Build trainer image
+        run: |
+          docker build -f services/trainer/Dockerfile -t livelab-trainer:ci services/trainer
+
+      - name: Run training (produce ./artifacts)
+        run: |
+          rm -rf artifacts
+          mkdir -p artifacts
+          docker run --rm --network host \
+            -e ARTIFACT_DIR=/artifacts \
+            -e POSTGRES_HOST=127.0.0.1 \
+            -e POSTGRES_PORT=5432 \
+            -e POSTGRES_DB=livelab \
+            -e POSTGRES_USER=app \
+            -e POSTGRES_PASSWORD=app \
+            -v "$PWD/artifacts:/artifacts" \
+            livelab-trainer:ci
+
+      - name: Check model quality gate
+        run: |
+          python3 - <<'PY'
+          import json
+          metrics = json.load(open("artifacts/metrics.json"))
+          f1 = metrics.get("f1", 0.0)
+          print(f"Model F1 score: {f1}")
+          if f1 < 0.60:
+            print(f"FAIL: F1 {f1} below threshold 0.60. Aborting deployment.")
+            exit(1)
+          print("PASS: Model quality gate satisfied.")
+          PY
+
+      - name: Extract model_version
+        run: |
+          python3 - <<'PY'
+          import os, json
+          mv = json.load(open("artifacts/metadata.json"))["model_version"]
+          with open(os.environ["GITHUB_ENV"], "a") as f:
+            f.write(f"MODEL_VERSION={mv}\n")
+          print("MODEL_VERSION=" + mv)
+          PY
+
+      - name: Upload artifacts (versioned + latest)
+        run: |
+          BASE="s3://${ARTIFACTS_S3_BUCKET}/${ARTIFACTS_S3_PREFIX}"
+          aws s3 sync artifacts "${BASE}/${MODEL_VERSION}/" --region "${AWS_REGION}"
+          aws s3 sync artifacts "${BASE}/latest/" --delete --region "${AWS_REGION}"
+
+      - name: Force new ECS deployment
+        run: |
+          aws ecs update-service \
+            --region "${AWS_REGION}" \
+            --cluster "${ECS_CLUSTER}" \
+            --service "${ECS_SERVICE}" \
+            --force-new-deployment > /dev/null
+
+          aws ecs wait services-stable \
+            --region "${AWS_REGION}" \
+            --cluster "${ECS_CLUSTER}" \
+            --services "${ECS_SERVICE}"
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "❌ Scheduled retraining failed. Check logs for details."
+          # In production, add Slack/email notification here

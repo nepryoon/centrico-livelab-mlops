@@ -233,7 +233,7 @@ def _llm_explain(row: Dict[str, float], y: int, proba: float) -> Tuple[str, bool
     if not api_key or OpenAI is None:
         return _fallback_explanation(row, y, proba), False
 
-    model_name = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
+    model_name = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
     system = (
         "Sei un assistente MLOps. Spiega una predizione di un modello ML in modo chiaro e breve.\n"
         "Regole: 1) non inventare feature non presenti, 2) non dare consigli medici/legali, "
@@ -249,9 +249,9 @@ def _llm_explain(row: Dict[str, float], y: int, proba: float) -> Tuple[str, bool
 
     try:
         client = OpenAI(api_key=api_key)
-        resp = client.responses.create(
+        resp = client.chat.completions.create(
             model=model_name,
-            input=[
+            messages=[
                 {"role": "system", "content": system},
                 {
                     "role": "user",
@@ -262,7 +262,7 @@ def _llm_explain(row: Dict[str, float], y: int, proba: float) -> Tuple[str, bool
                 },
             ],
         )
-        text = (getattr(resp, "output_text", "") or "").strip()
+        text = (resp.choices[0].message.content or "").strip()
         if not text:
             raise RuntimeError("Empty LLM response")
         return text, True

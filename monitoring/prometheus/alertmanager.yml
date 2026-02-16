@@ -1,0 +1,66 @@
+global:
+  # Set default timeouts
+  resolve_timeout: 5m
+
+route:
+  # Default receiver for all alerts
+  receiver: 'default'
+  
+  # How long to wait before sending a notification about new alerts
+  group_wait: 10s
+  
+  # How long to wait before sending notification about new alerts for the same group
+  group_interval: 5m
+  
+  # How often to send notifications about existing alerts
+  repeat_interval: 3h
+  
+  # Group alerts by these labels
+  group_by: ['alertname', 'severity']
+
+  # Route specific alerts to different receivers
+  routes:
+    # Critical alerts go to all channels
+    - match:
+        severity: critical
+      receiver: 'critical-alerts'
+      
+    # Warning alerts go to standard channel
+    - match:
+        severity: warning
+      receiver: 'warning-alerts'
+
+receivers:
+  # Default receiver - logs only
+  - name: 'default'
+    # No actual notification configured - alerts will appear in Prometheus UI
+
+  # Critical alerts receiver
+  - name: 'critical-alerts'
+    # Webhook example (uncomment and configure for production)
+    # webhook_configs:
+    #   - url: 'https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK'
+    #     send_resolved: true
+    
+  # Warning alerts receiver  
+  - name: 'warning-alerts'
+    # Webhook example (uncomment and configure for production)
+    # webhook_configs:
+    #   - url: 'https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK'
+    #     send_resolved: true
+
+# Inhibition rules - suppress certain alerts when others are firing
+inhibit_rules:
+  # If the service is down, don't alert on high error rate
+  - source_match:
+      alertname: 'InferenceServiceDown'
+    target_match:
+      alertname: 'HighErrorRate'
+    equal: ['job']
+  
+  # If the service is down, don't alert on high latency
+  - source_match:
+      alertname: 'InferenceServiceDown'
+    target_match:
+      alertname: 'HighPredictionLatency'
+    equal: ['job']
