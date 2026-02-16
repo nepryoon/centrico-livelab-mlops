@@ -52,7 +52,13 @@ Public APIs
                                    │
                                    ▼
                           [Prometheus] ---> [Grafana]
-Repo structure
+```
+
+---
+
+## Repo structure
+
+```text
 .
 ├── db/
 │   └── init.sql
@@ -80,46 +86,62 @@ Repo structure
 ├── docker-compose.monitoring.yml
 ├── requirements-dev.txt
 └── .github/workflows/ci.yml
-Prerequisites
+```
 
-Docker + Docker Compose plugin
+---
 
-curl
+## Prerequisites
 
-Note: on some Debian setups (e.g. trixie with Python 3.13), local pip install numpy/pandas may try to compile from source.
-Tests are CI-first and also runnable using a Python 3.11 Docker container (see below).
+- Docker + Docker Compose plugin
+- curl
 
-Quickstart (local demo)
-1) Start the stack (API + DB + monitoring)
+> Note: on some Debian setups (e.g. trixie with Python 3.13), local `pip install numpy/pandas` may try to compile from source.  
+> Tests are **CI-first** and also runnable using a **Python 3.11 Docker container** (see below).
+
+---
+
+## Quickstart (local demo)
+
+### 1) Start the stack (API + DB + monitoring)
 
 From repo root:
 
+```bash
 docker compose \
   -f docker-compose.local.yml \
   -f docker-compose.monitoring.yml \
   -f docker-compose.data.yml \
   up --build
-2) Check services
+```
+
+### 2) Check services
+
+```bash
 curl -s http://localhost:8000/health
 curl -s http://localhost:8000/metrics | head
-Data ingestion
+```
+
+---
+
+## Data ingestion
 
 The ingestion container fetches:
-
-CityBikes network snapshot → raw_bikes
-
-Open-Meteo current weather → raw_weather
+- CityBikes network snapshot → `raw_bikes`
+- Open-Meteo current weather → `raw_weather`
 
 Run a single ingestion cycle:
 
+```bash
 docker compose \
   -f docker-compose.local.yml \
   -f docker-compose.monitoring.yml \
   -f docker-compose.data.yml \
   run --rm ingestion python app/collector.py --once
+```
 
 Bootstrap more samples (recommended before training):
 
+```bash
 for i in $(seq 1 30); do
   docker compose \
     -f docker-compose.local.yml \
@@ -127,9 +149,11 @@ for i in $(seq 1 30); do
     -f docker-compose.data.yml \
     run --rm ingestion python app/collector.py --once
 done
+```
 
 Verify counts:
 
+```bash
 docker compose \
   -f docker-compose.local.yml \
   -f docker-compose.monitoring.yml \
@@ -141,103 +165,103 @@ docker compose \
   -f docker-compose.monitoring.yml \
   -f docker-compose.data.yml \
   exec postgres psql -U app -d livelab -c "select count(*) from raw_weather;"
-Model training (scikit-learn)
+```
+
+---
+
+## Model training (scikit-learn)
 
 Training writes:
-
-artifacts/model.joblib
-
-artifacts/metrics.json
-
-artifacts/metadata.json (includes model_version and feature list)
+- `artifacts/model.joblib`
+- `artifacts/metrics.json`
+- `artifacts/metadata.json` (includes `model_version` and feature list)
 
 Run training:
 
+```bash
 docker compose \
   -f docker-compose.local.yml \
   -f docker-compose.monitoring.yml \
   -f docker-compose.data.yml \
   -f docker-compose.train.yml \
   run --rm trainer
+```
 
 Inspect artifacts:
 
+```bash
 ls -lah artifacts/
 cat artifacts/metrics.json
 cat artifacts/metadata.json
+```
 
-Note: DB-mode target uses an adaptive quantile threshold to reduce “single class” failures.
+> Note: DB-mode target uses an adaptive quantile threshold to reduce “single class” failures.
 
-Inference API
+---
 
-The inference service mounts ./artifacts read-only, loads the model and serves predictions.
+## Inference API
 
-Endpoints
+The inference service mounts `./artifacts` read-only, loads the model and serves predictions.
 
-GET /health → liveness + model_loaded + version
+### Endpoints
 
-GET /model → model version + expected feature list
+- `GET /health` → liveness + model_loaded + version
+- `GET /model` → model version + expected feature list
+- `POST /predict`:
+  - body `{}` → uses **latest DB snapshot**
+  - body `{"features": {...}}` → predict on provided features
+- `GET /metrics` → Prometheus metrics
 
-POST /predict:
+### Example
 
-body {} → uses latest DB snapshot
-
-body {"features": {...}} → predict on provided features
-
-GET /metrics → Prometheus metrics
-
-Example
+```bash
 curl -s http://localhost:8000/model
 
 curl -sS -w "\nHTTP %{http_code}\n" -X POST "http://localhost:8000/predict" \
   -H "Content-Type: application/json" \
   -d '{}'
-Monitoring (Prometheus + Grafana)
+```
 
-Prometheus scrapes /metrics from the inference API.
+---
 
-Grafana connects to Prometheus as datasource.
+## Monitoring (Prometheus + Grafana)
+
+- Prometheus scrapes `/metrics` from the inference API.
+- Grafana connects to Prometheus as datasource.
 
 Typical metrics:
-
-http_requests_total{endpoint="/predict",status="200"}
-
-http_request_duration_seconds_*
-
-model_loaded
-
-model_version_info{version="..."} 1
+- `http_requests_total{endpoint="/predict",status="200"}`
+- `http_request_duration_seconds_*`
+- `model_loaded`
+- `model_version_info{version="..."} 1`
 
 Grafana UI:
-
-http://localhost:3000
- (credentials depend on your docker-compose.monitoring.yml)
+- http://localhost:3000 (credentials depend on your `docker-compose.monitoring.yml`)
 
 Prometheus UI:
+- http://localhost:9090
 
-http://localhost:9090
+---
 
-CI (GitHub Actions) + Model Quality Gate
+## CI (GitHub Actions) + Model Quality Gate
 
-Workflow: .github/workflows/ci.yml
+Workflow: `.github/workflows/ci.yml`
 
 What runs on each push / PR:
-
-pytest -q (contract test for inference + synthetic trainer test)
-
-Model Quality Gate: runs synthetic training and asserts f1 >= 0.60
-
-uploads ci_artifacts/ as build artifact
+1) `pytest -q` (contract test for inference + synthetic trainer test)
+2) **Model Quality Gate**: runs synthetic training and asserts `f1 >= 0.60`
+3) uploads `ci_artifacts/` as build artifact
 
 This ensures:
+- API contract stays stable
+- training pipeline is reproducible without DB
+- minimum quality threshold is enforced automatically
 
-API contract stays stable
+---
 
-training pipeline is reproducible without DB
+## Run tests locally (recommended via Docker)
 
-minimum quality threshold is enforced automatically
-
-Run tests locally (recommended via Docker)
+```bash
 docker run --rm -t \
   -v "$PWD":/repo -w /repo \
   python:3.11-slim \
@@ -246,53 +270,47 @@ docker run --rm -t \
             pip install -r services/inference/requirements.txt && \
             pip install -r services/trainer/requirements.txt && \
             pytest -q"
-Configuration
-Postgres (docker-compose.data.yml)
+```
 
-DB: livelab
+---
 
-user/pass: app/app
+## Configuration
 
-exposed port: 5432
+### Postgres (docker-compose.data.yml)
+- DB: `livelab`
+- user/pass: `app/app`
+- exposed port: `5432`
 
-Ingestion (docker-compose.data.yml)
+### Ingestion (docker-compose.data.yml)
+- `BIKE_NETWORK_ID` (default: `bicincitta-siena`)
+- `LAT`, `LON` for Open-Meteo
 
-BIKE_NETWORK_ID (default: bicincitta-siena)
+---
 
-LAT, LON for Open-Meteo
+## Why this is relevant for Centrico
 
-Why this is relevant for Centrico
-
-Data engineering (raw storage in Postgres, repeatable schema via SQL init)
-
-ML development (scikit-learn pipeline + artifacts + metadata)
-
-Operationalization (FastAPI service, model reload, DB-backed inference)
-
-Monitoring (Prometheus metrics, Grafana dashboards)
-
-MLOps discipline (CI tests + explicit quality gate)
+- **Data engineering** (raw storage in Postgres, repeatable schema via SQL init)
+- **ML development** (scikit-learn pipeline + artifacts + metadata)
+- **Operationalization** (FastAPI service, model reload, DB-backed inference)
+- **Monitoring** (Prometheus metrics, Grafana dashboards)
+- **MLOps discipline** (CI tests + explicit quality gate)
 
 The same pattern maps cleanly to Open Banking use-cases (credit/marketing propensity, anomaly/fraud signals, process automation) where:
+- ingestion may be PSD2/OpenAPI sources
+- raw events land in a datastore
+- training produces governed artifacts
+- inference is served through APIs with monitoring & rollout controls
 
-ingestion may be PSD2/OpenAPI sources
+---
 
-raw events land in a datastore
+## Roadmap (next steps)
 
-training produces governed artifacts
+- Step 7: **AWS deployment** (OIDC → ECR → staging deploy) + Terraform + GitHub Environments
+- Step 8: alerts + retraining trigger (Prometheus alert rules + scheduled trainer)
+- Step 9: optional **LLM block** (RAG over model cards/run logs + “explain prediction” endpoint)
 
-inference is served through APIs with monitoring & rollout controls
+---
 
-Roadmap (next steps)
+## License
 
-Step 7: AWS deployment (OIDC → ECR → staging deploy) + Terraform + GitHub Environments
-
-Step 8: alerts + retraining trigger (Prometheus alert rules + scheduled trainer)
-
-Step 9: optional LLM block (RAG over model cards/run logs + “explain prediction” endpoint)
-
-License
-
-MIT (or choose your preferred license)
-
-::contentReference[oaicite:0]{index=0}
+Apache 2.0
