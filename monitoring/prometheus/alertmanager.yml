@@ -51,9 +51,16 @@ receivers:
 
 # Inhibition rules - suppress certain alerts when others are firing
 inhibit_rules:
-  # If the service is down, don't alert on high error rate or latency
+  # If the service is down, don't alert on high error rate
   - source_match:
       alertname: 'InferenceServiceDown'
     target_match:
-      alertname: 'HighErrorRate|HighPredictionLatency'
+      alertname: 'HighErrorRate'
+    equal: ['job']
+  
+  # If the service is down, don't alert on high latency
+  - source_match:
+      alertname: 'InferenceServiceDown'
+    target_match:
+      alertname: 'HighPredictionLatency'
     equal: ['job']
