@@ -1,0 +1,62 @@
+groups:
+  - name: inference_api_alerts
+    interval: 30s
+    rules:
+      # Alert when model is not loaded
+      - alert: ModelNotLoaded
+        expr: model_loaded == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Inference API model not loaded"
+          description: "The ML model is not loaded in the inference service. Predictions will fail."
+
+      # Alert on high error rate
+      - alert: HighErrorRate
+        expr: |
+          (
+            sum(rate(http_requests_total{status=~"5.."}[5m]))
+            /
+            sum(rate(http_requests_total[5m]))
+          ) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High error rate on inference API"
+          description: "Error rate is above 5% for the last 5 minutes."
+
+      # Alert on high latency
+      - alert: HighPredictionLatency
+        expr: |
+          histogram_quantile(0.95, 
+            sum(rate(http_request_duration_seconds_bucket{endpoint="/predict"}[5m])) by (le)
+          ) > 1.0
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High prediction latency detected"
+          description: "95th percentile latency for /predict endpoint is above 1 second."
+
+      # Alert when service is down
+      - alert: InferenceServiceDown
+        expr: up{job="inference"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Inference API is down"
+          description: "The inference service is not responding to Prometheus scrapes."
+
+      # Alert on low prediction volume (potential data pipeline issue)
+      - alert: LowPredictionVolume
+        expr: |
+          sum(rate(http_requests_total{endpoint="/predict"}[10m])) < 0.01
+        for: 15m
+        labels:
+          severity: info
+        annotations:
+          summary: "Low prediction volume"
+          description: "Prediction endpoint is receiving very few requests. This might indicate an upstream data pipeline issue."
