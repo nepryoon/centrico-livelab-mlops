@@ -97,6 +97,34 @@ resource "aws_iam_role" "ecs_task_role" {
   })
 }
 
+# Allow ECS task role to read artifacts from S3
+resource "aws_iam_policy" "ecs_task_s3_artifacts_read" {
+  name = "${var.app_prefix}-ecs-task-s3-artifacts-read-${var.environment}"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "ListArtifactsBucket"
+        Effect   = "Allow"
+        Action   = ["s3:ListBucket"]
+        Resource = aws_s3_bucket.artifacts.arn
+      },
+      {
+        Sid      = "ReadArtifactsObjects"
+        Effect   = "Allow"
+        Action   = ["s3:GetObject"]
+        Resource = "${aws_s3_bucket.artifacts.arn}/*"
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "ecs_task_s3_artifacts_read" {
+  role       = aws_iam_role.ecs_task_role.name
+  policy_arn = aws_iam_policy.ecs_task_s3_artifacts_read.arn
+}
+
 resource "aws_ecs_task_definition" "inference" {
   family                   = "${var.app_prefix}-inference"
   requires_compatibilities = ["FARGATE"]
@@ -132,6 +160,7 @@ resource "aws_ecs_task_definition" "inference" {
       environment = concat(
         [
           { name = "ARTIFACT_DIR", value = "/artifacts" },
+          { name = "ARTIFACT_S3_URI", value = "s3://${aws_s3_bucket.artifacts.bucket}/models/latest/" },
 
           # DB
           { name = "POSTGRES_HOST", value = aws_db_instance.postgres.address },
