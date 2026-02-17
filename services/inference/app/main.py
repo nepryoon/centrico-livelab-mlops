@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import time
 from typing import Any, Dict, Optional, Tuple
@@ -17,6 +18,9 @@ from prometheus_client import (
     generate_latest,
 )
 from starlette.responses import Response, HTMLResponse
+
+# Setup logging
+logger = logging.getLogger(__name__)
 
 # OpenAI (optional at runtime: endpoint /explain works even without a key)
 try:
@@ -46,6 +50,27 @@ MODEL_VERSION_INFO = Gauge(
     "model_version_info",
     "Model version info",
     ["version"],
+    registry=REGISTRY,
+)
+
+# Custom ML metrics
+PREDICTION_SCORE = Histogram(
+    "prediction_score_distribution",
+    "Distribution of prediction probabilities",
+    buckets=[0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 1.0],
+    registry=REGISTRY,
+)
+PREDICTIONS_TOTAL = Counter(
+    "predictions_total",
+    "Total predictions by class and model version",
+    ["predicted_class", "model_version"],
+    registry=REGISTRY,
+)
+MODEL_F1 = Gauge("model_f1_score", "Current model F1 score", registry=REGISTRY)
+PREDICTION_LATENCY = Histogram(
+    "prediction_latency_seconds",
+    "Inference latency in seconds",
+    buckets=[0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5],
     registry=REGISTRY,
 )
 
@@ -185,6 +210,7 @@ def try_load_model() -> Tuple[bool, str]:
     MODEL = joblib.load(model_path)
 
     MODEL_LOADED.set(1)
+    MODEL_F1.set(meta.get("f1", 0.0))
     try:
         MODEL_VERSION_INFO.clear()
     except Exception:
@@ -298,11 +324,36 @@ def reload_model():
 
 @app.post("/predict", response_model=PredictResponse)
 def predict(req: PredictRequest):
-    t0 = time.time()
+    start = time.perf_counter()
     endpoint = "/predict"
     try:
         row = _prepare_row(req)
         y, proba = _predict_from_row(row)
+        latency = time.perf_counter() - start
+        
+        # Custom ML metrics
+        PREDICTION_SCORE.observe(float(proba))
+        PREDICTIONS_TOTAL.labels(
+            predicted_class=str(y),
+            model_version=MODEL_VERSION
+        ).inc()
+        PREDICTION_LATENCY.observe(latency)
+        
+        # Log prediction to database
+        try:
+            with get_pg_conn() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        "INSERT INTO prediction_log "
+                        "(input_json, predicted_class, probability, model_version, latency_ms) "
+                        "VALUES (%s, %s, %s, %s, %s)",
+                        (json.dumps(row), int(y), float(proba),
+                         MODEL_VERSION, round(latency * 1000, 2))
+                    )
+                    conn.commit()
+        except Exception as e:
+            logger.warning(f"prediction_log insert failed: {e}")
+        
         REQ_COUNT.labels(endpoint=endpoint, status="200").inc()
         return PredictResponse(y=y, proba=proba, version=MODEL_VERSION)
     except HTTPException as e:
@@ -312,7 +363,7 @@ def predict(req: PredictRequest):
         REQ_COUNT.labels(endpoint=endpoint, status="500").inc()
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        REQ_LAT.labels(endpoint=endpoint).observe(time.time() - t0)
+        REQ_LAT.labels(endpoint=endpoint).observe(time.perf_counter() - start)
 
 
 @app.post("/explain", response_model=ExplainResponse)
