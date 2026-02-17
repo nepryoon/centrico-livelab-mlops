@@ -204,7 +204,7 @@ def train_and_save(X: pd.DataFrame, y: np.ndarray, artifact_dir: str, target_met
 
     with open(meta_path, "w") as f:
         json.dump(
-            {"model_version": model_version, "features": feature_cols, **target_meta},
+            {"model_version": model_version, "features": feature_cols, "f1": f1, **target_meta},
             f,
             indent=2,
         )
