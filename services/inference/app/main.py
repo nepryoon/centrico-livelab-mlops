@@ -363,7 +363,7 @@ def predict(req: PredictRequest):
         REQ_COUNT.labels(endpoint=endpoint, status="500").inc()
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        REQ_LAT.labels(endpoint=endpoint).observe(time.time() - start)
+        REQ_LAT.labels(endpoint=endpoint).observe(time.perf_counter() - start)
 
 
 @app.post("/explain", response_model=ExplainResponse)
