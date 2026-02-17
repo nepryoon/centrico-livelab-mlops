@@ -260,9 +260,26 @@ Typical metrics:
 - `http_request_duration_seconds_*`
 - `model_loaded`
 - `model_version_info{version="..."} 1`
+- `prediction_score_distribution` — histogram of prediction probabilities
+- `predictions_total{predicted_class,model_version}` — predictions by class
+- `model_f1_score` — current model F1 score
+- `prediction_latency_seconds` — inference latency
+
+### Dashboard
+
+Grafana is auto-provisioned with a pre-built ML dashboard at startup:
+- **Model F1 Score** — current quality gate metric
+- **Predictions / min** — throughput
+- **P95 Latency** — inference performance
+- **Prediction Score Distribution** — heatmap for drift detection
+- **Predictions by Class** — class balance over time
+
+Access: http://localhost:3000 (admin / centrico)
+
+Prediction history is also logged to the `prediction_log` table for retrospective analysis.
 
 Grafana UI:
-- http://localhost:3000 (credentials depend on your `docker-compose.monitoring.yml`)
+- http://localhost:3000 (admin / centrico)
 
 Prometheus UI:
 - http://localhost:9090
@@ -376,9 +393,15 @@ The same pattern maps cleanly to Open Banking use-cases (credit/marketing propen
 - View fired alerts, silences, and notification status
 
 ### Grafana Dashboards
-- http://localhost:3000 (admin/admin)
+- http://localhost:3000 (admin/centrico)
 - Pre-configured datasource for Prometheus
-- Create custom dashboards for model metrics
+- Auto-provisioned ML Predictions dashboard with:
+  - Model F1 Score
+  - Predictions / min
+  - Request Rate & P95 Latency
+  - Prediction Score Distribution (heatmap)
+  - Predictions by Class
+- Prediction history logged to `prediction_log` table
 
 ### Configuring Alert Notifications
 
