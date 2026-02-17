@@ -62,9 +62,9 @@ resource "aws_iam_policy" "ecs_task_secrets_read" {
       ] : [],
       [
         {
-          Sid    = "KmsDecryptViaSecretsManager"
-          Effect = "Allow"
-          Action = ["kms:Decrypt"]
+          Sid      = "KmsDecryptViaSecretsManager"
+          Effect   = "Allow"
+          Action   = ["kms:Decrypt"]
           Resource = "*"
           Condition = {
             StringEquals = {

@@ -14,7 +14,7 @@ provider "aws" {
 # Terraform backend configuration for remote state
 terraform {
   required_version = ">= 1.6"
-  
+
   required_providers {
     aws = {
       source  = "hashicorp/aws"
