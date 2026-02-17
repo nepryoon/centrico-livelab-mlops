@@ -7,7 +7,9 @@
 **/crash.*.log
 
 # Sensitive tfvars (optional: keep them out of git)
+# Note: terraform.tfvars is allowed as it contains non-sensitive defaults
 **/*.tfvars
+!terraform.tfvars
 **/*.tfvars.json
 
 # Terraform CLI plans
